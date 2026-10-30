@@ -10,7 +10,7 @@ on:
       cherry_pick:
         description: 'tursodatabase/libsql commits to cherry-pick onto the tag, space-separated (admoai: #2261 local double-close fix)'
         required: false
-        default: 'd9f2f7d88823207556a2b9cfa3d766ef528538c2'
+        default: '4e06af572ddf7e3b82a8609c4c623637bae0d778'
 
 jobs:
   extract-headers:
