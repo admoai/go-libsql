@@ -6,9 +6,41 @@ on:
       libsql_tag:
         description: 'libsql repository tag to build (e.g. libsql-0.9.4)'
         required: true
-        default: 'libsql-0.9.4'
+        default: 'libsql-0.9.23'
+      cherry_pick:
+        description: 'tursodatabase/libsql commits to cherry-pick onto the tag, space-separated (admoai: #2261 local double-close fix)'
+        required: false
+        default: 'd9f2f7d88823207556a2b9cfa3d766ef528538c2'
 
 jobs:
+  extract-headers:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Set libsql tag
+        run: |
+          TAG=${{ github.event.inputs.libsql_tag }}
+          echo "Using tag: $TAG"
+          echo "LIBSQL_TAG=$TAG" >> $GITHUB_ENV
+
+      - name: Checkout libsql at tag
+        uses: actions/checkout@v4
+        with:
+          repository: tursodatabase/libsql
+          ref: ${{ env.LIBSQL_TAG }}
+          path: libsql
+          fetch-depth: 0
+
+      - name: Extract headers
+        run: |
+          mkdir -p include
+          cp libsql/bindings/c/include/libsql.h include/
+
+      - name: Upload header artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: libsql-headers
+          path: include/
+
   build-linux:
     runs-on: ubuntu-latest
     strategy:
@@ -38,6 +70,19 @@ jobs:
           repository: tursodatabase/libsql
           ref: ${{ env.LIBSQL_TAG }}
           path: libsql
+          fetch-depth: 0
+
+      - name: Apply cherry-picks (admoai fork)
+        if: github.event.inputs.cherry_pick != ''
+        working-directory: libsql
+        run: |
+          git config user.name "admoai-libsql-build"
+          git config user.email "devops@admoai.com"
+          for sha in ${{ github.event.inputs.cherry_pick }}; do
+            git fetch --no-tags origin "$sha"
+            git cherry-pick -x "$sha"
+          done
+          git log --oneline -n 3 | tee -a "$GITHUB_STEP_SUMMARY"
 
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
@@ -46,7 +91,11 @@ jobs:
           override: true
 
       - name: Install cross
-        run: cargo install cross
+        run: cargo install cross --version 0.2.5 --locked
+
+      - name: Record toolchain
+        run: |
+          { echo "### Toolchain (${{ matrix.target }})"; rustc --version; cargo --version; cross --version; } | tee -a "$GITHUB_STEP_SUMMARY"
 
       - name: Build libsql for ${{ matrix.target }}
         working-directory: libsql/bindings/c
@@ -88,11 +137,28 @@ jobs:
           repository: tursodatabase/libsql
           ref: ${{ env.LIBSQL_TAG }}
           path: libsql
+          fetch-depth: 0
+
+      - name: Apply cherry-picks (admoai fork)
+        if: github.event.inputs.cherry_pick != ''
+        working-directory: libsql
+        run: |
+          git config user.name "admoai-libsql-build"
+          git config user.email "devops@admoai.com"
+          for sha in ${{ github.event.inputs.cherry_pick }}; do
+            git fetch --no-tags origin "$sha"
+            git cherry-pick -x "$sha"
+          done
+          git log --oneline -n 3 | tee -a "$GITHUB_STEP_SUMMARY"
 
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
         with:
           targets: aarch64-apple-darwin
+
+      - name: Record toolchain
+        run: |
+          { echo "### Toolchain (aarch64-apple-darwin)"; rustc --version; cargo --version; } | tee -a "$GITHUB_STEP_SUMMARY"
 
       - name: Build libsql for macOS
         working-directory: libsql/bindings/c
@@ -114,7 +180,7 @@ jobs:
           path: go-libsql/lib/darwin_arm64
 
   verify-linux-amd64:
-    needs: [build-linux]
+    needs: [build-linux, extract-headers]
     runs-on: ubuntu-latest
     steps:
       - name: Checkout go-libsql
@@ -126,10 +192,18 @@ jobs:
           name: libsql-linux_amd64
           path: lib/linux_amd64
 
+      - name: Download headers
+        uses: actions/download-artifact@v4
+        with:
+          name: libsql-headers
+          path: lib/include
+
       - name: Check binary details
         run: |
           echo "Linux AMD64 library size:"
           ls -la lib/linux_amd64/libsql_experimental.a
+          echo "Header file:"
+          ls -la lib/include/libsql.h
 
       - name: Set up Go
         uses: actions/setup-go@v4
@@ -144,7 +218,7 @@ jobs:
           echo "Linux AMD64 build successful!"
 
   verify-linux-arm64:
-    needs: [build-linux]
+    needs: [build-linux, extract-headers]
     runs-on: ubuntu-latest
     steps:
       - name: Checkout go-libsql
@@ -156,10 +230,18 @@ jobs:
           name: libsql-linux_arm64
           path: lib/linux_arm64
 
+      - name: Download headers
+        uses: actions/download-artifact@v4
+        with:
+          name: libsql-headers
+          path: lib/include
+
       - name: Check binary details
         run: |
           echo "Linux ARM64 library size:"
           ls -la lib/linux_arm64/libsql_experimental.a
+          echo "Header file:"
+          ls -la lib/include/libsql.h
 
       - name: Set up Go
         uses: actions/setup-go@v4
@@ -179,7 +261,7 @@ jobs:
           echo "Linux ARM64 build successful!"
 
   verify-darwin-arm64:
-    needs: [build-macos]
+    needs: [build-macos, extract-headers]
     runs-on: macos-latest
     steps:
       - name: Checkout go-libsql
@@ -191,10 +273,18 @@ jobs:
           name: libsql-darwin_arm64
           path: lib/darwin_arm64
 
+      - name: Download headers
+        uses: actions/download-artifact@v4
+        with:
+          name: libsql-headers
+          path: lib/include
+
       - name: Check binary details
         run: |
           echo "Darwin ARM64 library size:"
           ls -la lib/darwin_arm64/libsql_experimental.a
+          echo "Header file:"
+          ls -la lib/include/libsql.h
 
       - name: Set up Go
         uses: actions/setup-go@v4
@@ -223,10 +313,19 @@ jobs:
 
       - name: Copy artifacts to repository
         run: |
-          mkdir -p lib/linux_amd64 lib/linux_arm64 lib/darwin_arm64
+          mkdir -p lib/linux_amd64 lib/linux_arm64 lib/darwin_arm64 lib/include
           cp -r artifacts/libsql-linux_amd64/* lib/linux_amd64/
           cp -r artifacts/libsql-linux_arm64/* lib/linux_arm64/
           cp -r artifacts/libsql-darwin_arm64/* lib/darwin_arm64/
+
+          # only copy header if it changed
+          if ! cmp -s artifacts/libsql-headers/libsql.h lib/include/libsql.h 2>/dev/null; then
+            cp artifacts/libsql-headers/libsql.h lib/include/
+            echo "Header file updated"
+          else
+            echo "Header file unchanged, skipping"
+          fi
+
           # Clean up artifacts directory to prevent it from being included in the PR
           rm -rf artifacts
 
@@ -239,16 +338,17 @@ jobs:
       - name: Create Pull Request
         uses: peter-evans/create-pull-request@v5
         with:
-          commit-message: "Update libsql libraries to `${{ env.LIBSQL_TAG }}`"
-          title: "Update libsql libraries to `${{ env.LIBSQL_TAG }}`"
+          commit-message: "Update libsql libraries to `${{ env.LIBSQL_TAG }}` + ${{ github.event.inputs.cherry_pick }}"
+          title: "Update libsql libraries to `${{ env.LIBSQL_TAG }}` with cherry-picks"
           body: |
-            This PR updates the libsql static libraries to version `${{ env.LIBSQL_TAG }}`.
+            This PR updates the libsql static libraries to version `${{ env.LIBSQL_TAG }}`, with these tursodatabase/libsql commits cherry-picked: `${{ github.event.inputs.cherry_pick }}` (admoai fork; upstream fix tursodatabase/libsql#2261 for #2251, not yet released).
             
             Libraries updated:
             - `linux_amd64/libsql_experimental.a`
             - `linux_arm64/libsql_experimental.a`
             - `darwin_arm64/libsql_experimental.a`
+            - `include/libsql.h` (if changed)
             
             This update was generated automatically by the [update-libsql workflow](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}).
-          branch: update-${{ env.LIBSQL_TAG }}
+          branch: update-${{ env.LIBSQL_TAG }}-admoai
           delete-branch: true
