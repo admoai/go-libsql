@@ -6,7 +6,11 @@ on:
       libsql_tag:
         description: 'libsql repository tag to build (e.g. libsql-0.9.4)'
         required: true
-        default: 'libsql-0.9.4'
+        default: 'libsql-0.9.23'
+      cherry_pick:
+        description: 'tursodatabase/libsql commits to cherry-pick onto the tag, space-separated (admoai: #2261 local double-close fix)'
+        required: false
+        default: 'd9f2f7d88823207556a2b9cfa3d766ef528538c2'
 
 jobs:
   extract-headers:
@@ -24,6 +28,7 @@ jobs:
           repository: tursodatabase/libsql
           ref: ${{ env.LIBSQL_TAG }}
           path: libsql
+          fetch-depth: 0
 
       - name: Extract headers
         run: |
@@ -65,6 +70,19 @@ jobs:
           repository: tursodatabase/libsql
           ref: ${{ env.LIBSQL_TAG }}
           path: libsql
+          fetch-depth: 0
+
+      - name: Apply cherry-picks (admoai fork)
+        if: github.event.inputs.cherry_pick != ''
+        working-directory: libsql
+        run: |
+          git config user.name "admoai-libsql-build"
+          git config user.email "devops@admoai.com"
+          for sha in ${{ github.event.inputs.cherry_pick }}; do
+            git fetch --no-tags origin "$sha"
+            git cherry-pick -x "$sha"
+          done
+          git log --oneline -n 3 | tee -a "$GITHUB_STEP_SUMMARY"
 
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
@@ -73,7 +91,11 @@ jobs:
           override: true
 
       - name: Install cross
-        run: cargo install cross
+        run: cargo install cross --version 0.2.5 --locked
+
+      - name: Record toolchain
+        run: |
+          { echo "### Toolchain (${{ matrix.target }})"; rustc --version; cargo --version; cross --version; } | tee -a "$GITHUB_STEP_SUMMARY"
 
       - name: Build libsql for ${{ matrix.target }}
         working-directory: libsql/bindings/c
@@ -115,11 +137,28 @@ jobs:
           repository: tursodatabase/libsql
           ref: ${{ env.LIBSQL_TAG }}
           path: libsql
+          fetch-depth: 0
+
+      - name: Apply cherry-picks (admoai fork)
+        if: github.event.inputs.cherry_pick != ''
+        working-directory: libsql
+        run: |
+          git config user.name "admoai-libsql-build"
+          git config user.email "devops@admoai.com"
+          for sha in ${{ github.event.inputs.cherry_pick }}; do
+            git fetch --no-tags origin "$sha"
+            git cherry-pick -x "$sha"
+          done
+          git log --oneline -n 3 | tee -a "$GITHUB_STEP_SUMMARY"
 
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
         with:
           targets: aarch64-apple-darwin
+
+      - name: Record toolchain
+        run: |
+          { echo "### Toolchain (aarch64-apple-darwin)"; rustc --version; cargo --version; } | tee -a "$GITHUB_STEP_SUMMARY"
 
       - name: Build libsql for macOS
         working-directory: libsql/bindings/c
@@ -299,10 +338,10 @@ jobs:
       - name: Create Pull Request
         uses: peter-evans/create-pull-request@v5
         with:
-          commit-message: "Update libsql libraries to `${{ env.LIBSQL_TAG }}`"
-          title: "Update libsql libraries to `${{ env.LIBSQL_TAG }}`"
+          commit-message: "Update libsql libraries to `${{ env.LIBSQL_TAG }}` + ${{ github.event.inputs.cherry_pick }}"
+          title: "Update libsql libraries to `${{ env.LIBSQL_TAG }}` with cherry-picks"
           body: |
-            This PR updates the libsql static libraries to version `${{ env.LIBSQL_TAG }}`.
+            This PR updates the libsql static libraries to version `${{ env.LIBSQL_TAG }}`, with these tursodatabase/libsql commits cherry-picked: `${{ github.event.inputs.cherry_pick }}` (admoai fork; upstream fix tursodatabase/libsql#2261 for #2251, not yet released).
             
             Libraries updated:
             - `linux_amd64/libsql_experimental.a`
@@ -311,5 +350,5 @@ jobs:
             - `include/libsql.h` (if changed)
             
             This update was generated automatically by the [update-libsql workflow](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}).
-          branch: update-${{ env.LIBSQL_TAG }}
+          branch: update-${{ env.LIBSQL_TAG }}-admoai
           delete-branch: true
