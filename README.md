@@ -86,3 +86,9 @@ downloaded and as committed:
 
 `lib/include/libsql.h` is unchanged from libsql-0.9.23. To re-derive, dispatch `update-libsql.yml`
 on that branch with `libsql_tag=libsql-0.9.23` and `cherry_pick=4e06af572ddf7e3b82a8609c4c623637bae0d778`.
+
+### Exit
+
+Upstream release requests: tursodatabase/libsql#2307 (a release containing #2261) and
+tursodatabase/go-libsql#92 (rebuilt libraries once it exists). When go-libsql ships the fix,
+admoai/adhub drops the `replace` and this fork is archived.
