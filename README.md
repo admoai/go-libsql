@@ -62,3 +62,9 @@ terms or conditions.
 
 [MIT license]: https://github.com/tursodatabase/go-libsql/blob/main/LICENSE
 [example directory]: https://github.com/tursodatabase/go-libsql/tree/main/example
+
+## admoai fork
+
+This fork carries `libsql-0.9.23` plus tursodatabase/libsql#2261 (the fix for the local connection
+double close, tursodatabase/libsql#2251) until upstream releases it. The rebuilt static libraries
+live on the patch branch `admoai/v0.9.23-fix-2261`. Tracking: admoai/adhub#5157.
